@@ -1,0 +1,7 @@
+2025-10-24 07:26:06,912 [INFO] ***** Running training *****
+2025-10-24 07:26:06,912 [INFO]   Num examples = 15
+2025-10-24 07:26:06,912 [INFO]   Num Epochs = 3334
+2025-10-24 07:26:06,912 [INFO]   Instantaneous batch size per device = 6
+2025-10-24 07:26:06,912 [INFO]   Total train batch size (w. parallel, distributed & accumulation) = 6
+2025-10-24 07:26:06,912 [INFO]   Gradient Accumulation steps = 1
+2025-10-24 07:26:06,912 [INFO]   Total optimization steps = 10000

@@ -1,0 +1,38 @@
+# 通用
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.venv/
+venv/
+
+# C/C++/CUDA
+build/
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.out
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Images & weights (若需要LFS再另行追踪)
+# *.pt
+# *.pth
+# *.ckpt
