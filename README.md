@@ -8,5 +8,14 @@ The source code of MoGen.
 
 # 2. How to use
 
-if training text-to-image:
-python train_add_box.py --train_data_dir 'MoGen/data/' --output_dir 'MoGen/checkpoints/' --train_batch_size 6 --max_train_steps 10000 --learning_rate 5e-05 --train_text True
+## Training
+
+To train the model, run the following command:
+
+```bash
+python train_add_box.py --train_data_dir 'MoGen/data' \
+                        --output_dir 'MoGen/checkpoints' \
+                        --train_batch_size 8 \
+                        --max_train_steps 10000 \
+                        --learning_rate 5e-05 \
+                        --train_text True
