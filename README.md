@@ -2,6 +2,6 @@
 The source code of MoGen.
 
 # 1. Todo
-- [×] Release training code
-- [×] Release evaluation code
+- [x] Release training code
+- [x] Release evaluation code
 - [ ] Release training dataset
