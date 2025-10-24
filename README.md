@@ -8,7 +8,7 @@ The source code of MoGen.
 
 # 2. How to use
 
-## Training
+## Text-to-image Training
 
 To train the text-to-image model, run the following command:
 
@@ -19,6 +19,8 @@ python train_add_box.py --train_data_dir 'MoGen/data' \
                         --max_train_steps 10000 \
                         --learning_rate 5e-05 \
                         --train_text True
+
+## Adaptive Control Training
 
 To further train the adaptive control, run the following command:
 ```bash
