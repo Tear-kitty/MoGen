@@ -12,7 +12,6 @@ import cv2 as cv
 from safetensors import safe_open
 
 import os
-#os.environ['CUDA_VISIBLE_DEVICES'] = '1' 
 
 import diffusers
 import numpy as np
@@ -36,11 +35,12 @@ from diffusers.utils.import_utils import is_xformers_available
 from huggingface_hub import HfFolder, Repository, create_repo, whoami
 # TODO: remove and import from diffusers.utils when the new version of diffusers is released
 from packaging import version
-from PIL import Image
+from PIL import Image, ImageOps
 from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPFeatureExtractor, CLIPTextModelWithProjection, CLIPVisionModelWithProjection, CLIPImageProcessor
+
 #from templates.embedding import Timesteps
 
 from ip_adapter_XL.ip_adapter import WindowAwareLinearProjection
@@ -114,7 +114,7 @@ def parse_args():
     parser.add_argument(
         "--save_steps",
         type=int,
-        default=2000,
+        default=1000,
         help="Save learned_embeds.bin every X updates steps.",
     )
     parser.add_argument(
@@ -132,14 +132,6 @@ def parse_args():
         "Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
-        "--revision",
-        type=str,
-        default=None,
-        required=False,
-        help=
-        "Revision of pretrained model identifier from huggingface.co/models.",
-    )
-    parser.add_argument(
         "--tokenizer_name",
         type=str,
         default=None,
@@ -148,7 +140,6 @@ def parse_args():
     parser.add_argument(
         "--train_data_dir", 
         type=str,
-        default=None,
         required=True,
         help=
         "The folder that contains the exemplar images (and coarse descriptions) of the specific relation."
@@ -161,7 +152,6 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default=None,
         required=True,
         help=
         "The output directory where the model predictions and checkpoints will be written.",
@@ -193,7 +183,7 @@ def parse_args():
     parser.add_argument(
         "--max_train_steps",
         type=int,
-        default=10000,
+        default=20000,
         help=
         "Total number of training steps to perform.  If provided, overrides num_train_epochs.",
     )
@@ -240,7 +230,7 @@ def parse_args():
     parser.add_argument(
         "--dataloader_num_workers",
         type=int,
-        default=16, 
+        default=0, 
         help=
         ("Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
          ),
@@ -317,15 +307,6 @@ def parse_args():
          ),
     )
     parser.add_argument(
-        "--validation_epochs",
-        type=int,
-        default=50,
-        help=
-        ("Run validation every X epochs. Validation consists of running the prompt"
-         " `args.validation_prompt` multiple times: `args.num_validation_images`"
-         " and logging the images."),
-    )
-    parser.add_argument(
         "--local_rank",
         type=int,
         default=-1,
@@ -371,18 +352,6 @@ def parse_args():
         help="Weight of L_steer (for Relation-Steering Contrastive Learning)",
     )
     parser.add_argument(
-        "--num_positives",
-        type=int,
-        default=4,
-        help="Number of positive words used for L_steer",
-    )
-    parser.add_argument(
-        "--num_negtives",
-        type=int,
-        default=4,
-        help="Number of negtive words",
-    )
-    parser.add_argument(
         "--temperature",
         type=float,
         default="0.07",
@@ -414,13 +383,6 @@ def parse_args():
         help="whether to use adapter",
     )
     parser.add_argument(
-        "--positive_number",
-        type=str,
-        required=False,
-        default='four',
-        help="positive samples of placeholder",
-    )
-    parser.add_argument(
         "--first_step",
         type=int,
         default=0,
@@ -433,13 +395,6 @@ def parse_args():
         default=False,
         required=True,
     )
-    parser.add_argument(
-        "--ckpt_path",
-        type=bool,
-        default=False,
-        required=True,
-    )
-
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -483,16 +438,150 @@ def draw_one_box(canvas, box, label=None, thickness=3, fill=False, clamp=True):
     if fill:
         cv2.rectangle(canvas, (l,t), (r,b), color, -1)
     cv2.rectangle(canvas, (l,t), (r,b), color, thickness)
-    return canvas
+    return canvas, color
 
 def to_pil(canvas):
     return Image.fromarray(canvas)
 
 def load_image(path):
-    img = Image.open(path).convert("RGBA")           
-    bg = Image.new("RGB", img.size, (255, 255, 255))  
-    bg.paste(img, mask=img.split()[3])               
-    return bg
+    img = Image.open(path).convert("RGB")
+
+    arr = np.array(img)  
+    mask = (arr[:, :, 0] == 0) & (arr[:, :, 1] == 0) & (arr[:, :, 2] == 0)  # 纯黑
+    arr[mask] = [255, 255, 255]  
+
+    img = Image.fromarray(arr, "RGB")
+
+    w, h = img.size
+    side = int(max(w, h)/0.875)
+
+    square = Image.new("RGB", (side, side), (255, 255, 255))  # 白底
+    left = (side - w) // 2
+    top = (side - h) // 2
+    square.paste(img, (left, top))
+
+    img2 = square
+
+    return img2
+
+from typing import Iterable, List, Tuple
+_NUM_MAP = {
+    "a": 1, "an": 1, "one": 1,
+    "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+}
+
+_NUM_RE = re.compile(r'^\s*(' + "|".join(_NUM_MAP.keys()) + r')\b', re.IGNORECASE)
+
+def extract_count_words_and_numbers(object_path: Iterable[str]) -> Tuple[List[str], List[int]]:
+    words: List[str] = []
+    nums: List[int] = []
+
+    for p in object_path:
+        stem = os.path.splitext(os.path.basename(p))[0]
+        m = _NUM_RE.match(stem)
+        if not m:
+            continue
+        w = m.group(1).lower()
+        words.append(w + " ")      
+        nums.append(_NUM_MAP[w])
+
+    return words, nums
+
+def _to_xyxy(points):
+    (x1, y1), (x2, y2) = points
+    x_min = min(x1, x2)
+    y_min = min(y1, y2)
+    x_max = max(x1, x2)
+    y_max = max(y1, y2)
+    return x_min, y_min, x_max, y_max
+
+def _clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+def _iou_xyxy(a, b):
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+
+    iw = max(0.0, ix2 - ix1)
+    ih = max(0.0, iy2 - iy1)
+    inter = iw * ih
+
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = area_a + area_b - inter
+    return inter / union if union > 1e-9 else 0.0
+
+def jitter_labelme_box_points(
+    points,
+    img_w=1024,
+    img_h=1024,
+    p=0.7,
+    shift_sigma=0.03,   # 0.05 * min(w,h)
+    scale_sigma=0.10,   # log-scale sigma
+    aspect_sigma=0.05,  # log-aspect sigma
+    iou_min=0.7,
+    min_size=8.0,
+    max_tries=30
+):
+    orig = _to_xyxy(points)
+
+    ox1, oy1, ox2, oy2 = orig
+    ow = ox2 - ox1
+    oh = oy2 - oy1
+    if ow < 1.0 or oh < 1.0:
+        return [list(points[0]), list(points[1])]
+
+    if random.random() > p:
+        return [[ox1, oy1], [ox2, oy2]]
+
+    ocx = (ox1 + ox2) * 0.5
+    ocy = (oy1 + oy2) * 0.5
+    base = min(ow, oh)
+
+    for _ in range(max_tries):
+        dx = random.gauss(0.0, shift_sigma * base)
+        dy = random.gauss(0.0, shift_sigma * base)
+
+        s = math.exp(random.gauss(0.0, scale_sigma))
+
+        a = math.exp(random.gauss(0.0, aspect_sigma))
+
+        nw = ow * s * a
+        nh = oh * s / a
+
+        nw = max(nw, min_size)
+        nh = max(nh, min_size)
+
+        ncx = ocx + dx
+        ncy = ocy + dy
+
+        nx1 = ncx - nw * 0.5
+        ny1 = ncy - nh * 0.5
+        nx2 = ncx + nw * 0.5
+        ny2 = ncy + nh * 0.5
+
+        nx1 = _clamp(nx1, 0.0, float(img_w))
+        ny1 = _clamp(ny1, 0.0, float(img_h))
+        nx2 = _clamp(nx2, 0.0, float(img_w))
+        ny2 = _clamp(ny2, 0.0, float(img_h))
+
+        nx1, ny1, nx2, ny2 = min(nx1, nx2), min(ny1, ny2), max(nx1, nx2), max(ny1, ny2)
+
+        if (nx2 - nx1) < min_size or (ny2 - ny1) < min_size:
+            continue
+
+        new_box = (nx1, ny1, nx2, ny2)
+        if _iou_xyxy(orig, new_box) >= iou_min:
+            return [[nx1, ny1], [nx2, ny2]]
+
+    return [[ox1, oy1], [ox2, oy2]]
 
 class ReVersionDataset(Dataset):
 
@@ -509,8 +598,6 @@ class ReVersionDataset(Dataset):
         center_crop=True,
     ):
         self.data_root = data_root
-
-        self.text_path = os.path.join(data_root, 'position')
 
         self.tokenizer = tokenizer
         self.tokenizer_2 = tokenizer_2
@@ -546,7 +633,7 @@ class ReVersionDataset(Dataset):
         self.transform_mask = transforms.Compose([
             transforms.Resize((512, 512), interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5,0.5,0.5], std=[0.5,0.5,0.5]),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
         self.clip_image_processor = CLIPImageProcessor()
@@ -575,35 +662,56 @@ class ReVersionDataset(Dataset):
         image = Image.open(image_path)
         
         image_name = image_path.split('/')[-1]
+        example["image_path"] = image_path
 
+        possibility = random.random()
         #structure
-        structure_ref_path = image_path.replace('/image/', '/structured-image/')
-        structure_ref = Image.open(structure_ref_path)
-        if not structure_ref.mode == "RGB":
-            structure_ref = structure_ref.convert("RGB")
-        structure_ref_tensor = self.dino_processor(images=structure_ref, return_tensors="pt").pixel_values[0]
-        example["structure"] = structure_ref_tensor
+        structure_ref_path = image_path.replace('/image/', '/structure/')
+        if os.path.isfile(structure_ref_path):
+            structure_ref = Image.open(structure_ref_path)
+            if not structure_ref.mode == "RGB":
+                structure_ref = structure_ref.convert("RGB")
+            structure_ref_tensor = self.dino_processor(images=structure_ref, return_tensors="pt").pixel_values[0]
+            example["structure"] = structure_ref_tensor
+            example["has_structure"] = 1
+        else:
+            example["structure"] = torch.zeros(3, 224, 224)
+            example["has_structure"] = 0
 
-        #apprearance
+        #object
         new_path = image_path.replace('/image/', '/object/')
         file_stem = os.path.splitext(os.path.basename(new_path))[0]
         appearance_ref_path = os.path.join(os.path.dirname(new_path), file_stem, '')
         if os.path.exists(appearance_ref_path):
-            images = [load_image(os.path.join(appearance_ref_path, f))
-            for f in os.listdir(appearance_ref_path) if f.lower().endswith(".png")]
+            images = [load_image(os.path.join(appearance_ref_path, f)) for f in os.listdir(appearance_ref_path) if f.lower().endswith(".png")]
+            # for imge in images:
+            #     imge.save(f'~/checkpoints/i.png')
+            object_path = [(os.path.join(appearance_ref_path, f)) for f in os.listdir(appearance_ref_path) if f.lower().endswith(".png")]
+            _, count_nums = extract_count_words_and_numbers(object_path)
             appearance_ref_tensor = [self.dino_processor(images=img, return_tensors="pt").pixel_values[0] for img in images]
             appearance_ref_tensor = torch.stack(appearance_ref_tensor, dim=0)
+            count_nums_tensor = torch.tensor(count_nums, device=appearance_ref_tensor.device)
+            appearance_ref_tensor = torch.repeat_interleave(
+                appearance_ref_tensor,
+                repeats=count_nums_tensor,
+                dim=0
+            )
             b, c, h, w = appearance_ref_tensor.shape
-            if b<6:
-                appearance_ref_tensor_padded = torch.zeros(6, c, h, w, dtype=appearance_ref_tensor.dtype, device=appearance_ref_tensor.device)
+            if b<=15:
+                appearance_ref_tensor_padded = torch.zeros(15, c, h, w, dtype=appearance_ref_tensor.dtype, device=appearance_ref_tensor.device)
                 appearance_ref_tensor_padded[:b] = appearance_ref_tensor
+            else:
+                raise ValueError('len(object) ref>15')
             appearance_ref_num = len(appearance_ref_tensor)
             example["appearance"] = appearance_ref_tensor_padded
             example["appearance_num"] = appearance_ref_num
+            example["has_appearance"] = 1
         else:
-            appearance_ref_tensor_padded = torch.zeros(6, 3, 224, 224, dtype=structure_ref_tensor.dtype, device=structure_ref_tensor.device)
+            # raise ValueError('no object reference')
+            appearance_ref_tensor_padded = torch.zeros(15, 3, 224, 224)
             example["appearance"] = appearance_ref_tensor_padded
             example["appearance_num"] = 0
+            example["has_appearance"] = 0
 
         raw_image = image
         if not image.mode == "RGB":
@@ -636,39 +744,49 @@ class ReVersionDataset(Dataset):
         example["crop_coords_top_left"] = crop_coords_top_left
         example["target_size"] = torch.tensor([self.size, self.size])
 
+        #text
         json_name = image_name.split('.')[0]+'.json'
         json_path = os.path.join(self.image_json_path, json_name)
         with open(json_path, 'r', encoding='utf-8') as file:
             self.templates = json.load(file)
         # text = random.choice(self.templates[image_name])
-        text = self.templates[image_name][0]
+        text = self.templates[-1]
 
         #box
-        box_json_name = image_name.split('.')[0]+'_box.json'
+        box_json_name = image_name.split('.')[0]+'.json'
         box_json_path = os.path.join(self.image_box_path, box_json_name)
-        with open(box_json_path, 'r', encoding='utf-8') as file:
-            data = json.load(file)
-        
-        label=0
-        canvas = create_canvas(H=512, W=512)
-        box_mask = []
-        for shape in data['shapes']:
-            points = shape['points']
-            x1, y1 = points[0]
-            x2, y2 = points[1]
-            x1, y1, x2, y2 = (int(x1*512/original_width)), (int(y1*512/original_width)), (int(x2*512/original_width)), (int(y2*512/original_width))
-            if x1>512 or y1>512 or x2>512 or y2>512:
-                raise ValueError('xy>512')
-            box=[x1, y1, x2, y2]
-            canvas = draw_one_box(canvas, box, label, thickness=3, fill=False)
-            label+=1
-        box_mask = to_pil(canvas)
-        # box_mask.save(f"box.png") 
-        box_img=self.transform_mask(box_mask)
-        example["box_mask"] = box_img
+        if os.path.isfile(box_json_path):
+            with open(box_json_path, 'r', encoding='utf-8') as file:
+                data = json.load(file)
+            box_label = data['shapes'][0]['label']
+            label=0
+            canvas = create_canvas(H=512, W=512)
+            box_mask = []
+            labels=[]
+            for shape in data['shapes']:
+                points = shape['points']
+                # points = jitter_labelme_box_points(points, p=0.5, img_w=1024, img_h=1024)
+                x1, y1 = points[0]
+                x2, y2 = points[1]
+                x1, y1, x2, y2 = (int(x1*512/data['imageHeight'])), (int(y1*512/data['imageHeight'])), (int(x2*512/data['imageHeight'])), (int(y2*512/data['imageHeight']))
+                if x1>512 or y1>512 or x2>512 or y2>512:
+                    raise ValueError('xy>512')
+                box=[x1, y1, x2, y2]
+                canvas, color = draw_one_box(canvas, box, label, thickness=3, fill=False)
+            box_mask = to_pil(canvas)
+            # box_mask.save(f"box.png") 
+            box_img=self.transform_mask(box_mask)
+            example["box_mask"] = box_img
+            example["has_box_mask"] = 1
+        else:
+            canvas = create_canvas(H=512, W=512)
+            box_mask = to_pil(canvas)
+            # box_mask.save(f"box.png") 
+            box_img=self.transform_mask(box_mask)
+            example["box_mask"] = box_img
+            example["has_box_mask"] = 0
 
         drop_image_embdes = 0
-        possibility = random.random()
         if possibility < 0.05 :
             drop_image_embdes = 1
         elif possibility < 0.1:
@@ -734,8 +852,8 @@ def main():
         
         return logger
 
-    os.makedirs('~/', exist_ok=True)
-    logging_dir = os.path.join('~/', 'log.txt')
+    os.makedirs('MoGen/', exist_ok=True)
+    logging_dir = os.path.join('MoGen/', 'log.txt')
     logger = init_logger(logging_dir)
 
     accelerator = Accelerator(
@@ -793,7 +911,7 @@ def main():
             os.makedirs(args.output_dir, exist_ok=True)
     
     # Load scheduler, tokenizer and models.
-    args.pretrained_model_name_or_path = '~/models--stabilityai--stable-diffusion-xl-base-1.0/snapshots/462165984030d82259a11f4367a4eed129e94a7b/'
+    args.pretrained_model_name_or_path = 'models--stabilityai--stable-diffusion-xl-base-1.0/snapshots/462165984030d82259a11f4367a4eed129e94a7b/'
     ip_ckpt = "InstantStyle-main/sdxl_models/ip-adapter_sdxl.bin"
     
     noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
@@ -830,7 +948,7 @@ def main():
 
     # init adapter modules
     if args.train_text:
-        num_tokens = 128
+        num_tokens = 64
         attn_procs = {}
         unet_sd = unet.state_dict()
         target_blocks = ['down_blocks.2.attentions.1'] #['down_blocks.2.attentions.1','up_blocks.0.attentions.1'] 
@@ -867,7 +985,7 @@ def main():
         state_dict_ip = torch.load(ip_ckpt, map_location="cpu")
         adapter_modules.load_state_dict(state_dict_ip["ip_adapter"], strict=False)
     else:
-        num_tokens = 512
+        num_tokens = 256
         attn_procs = {}
         unet_sd = unet.state_dict()
         target_blocks = ['blocks'] 
@@ -904,7 +1022,7 @@ def main():
         unet.set_attn_processor(attn_procs)
         adapter_modules = torch.nn.ModuleList(unet.attn_processors.values())
         state_dict_ip = torch.load(ip_ckpt, map_location="cpu")
-        adapter_modules.load_state_dict(state_dict_ip["ip_adapter"], strict=False)
+        adapter_modules.load_state_dict(state_dict_ip["ip_adapter"], strict=True)
 
     class IPAdapter(torch.nn.Module):
         def __init__(self, unet, text_embedding_projector, adapter_modules):
@@ -913,8 +1031,8 @@ def main():
             self.text_embedding_projector = text_embedding_projector
             self.adapter_modules = adapter_modules
 
-        def forward(self, noisy_latents, timesteps, text_embeds, dino, batch, unet_added_cond_kwargs):
-            text_embeds, cond_embeds = text_embedding_projector(text_embeds, dino, batch)
+        def forward(self, noisy_latents, timesteps, text_embeds, dino, vae, batch, unet_added_cond_kwargs):
+            text_embeds, cond_embeds = text_embedding_projector(text_embeds, dino, vae, batch)
             encoder_hidden_states = text_embeds
             encoder_hidden_states = torch.cat([encoder_hidden_states, cond_embeds], dim=1)
             # Predict the noise residual
@@ -926,22 +1044,21 @@ def main():
     if not args.train_text:
         # Calculate original checksums
         orig_ip_proj_sum = torch.sum(torch.stack([torch.sum(p) for p in ip_adapter.text_embedding_projector.parameters()]))
-        orig_adapter_sum = torch.sum(torch.stack([torch.sum(p) for p in ip_adapter.adapter_modules.parameters()]))
+        # orig_adapter_sum = torch.sum(torch.stack([torch.sum(p) for p in ip_adapter.adapter_modules.parameters()]))
 
-        ckpt_path = args.ckpt_path
+        ckpt_path = '~/checkpoints/checkpoint-text/text_embedding_projector.bin'
         state_dict = torch.load(ckpt_path, map_location="cpu")
 
         # Load state dict for image_proj_model and adapter_modules
         ip_adapter.text_embedding_projector.load_state_dict(state_dict["text_embedding_projector"], strict=False)
-        ip_adapter.adapter_modules.load_state_dict(state_dict["ip_adapter"], strict=False)
 
         # Calculate new checksums
         new_ip_proj_sum = torch.sum(torch.stack([torch.sum(p) for p in ip_adapter.text_embedding_projector.parameters()]))
-        new_adapter_sum = torch.sum(torch.stack([torch.sum(p) for p in ip_adapter.adapter_modules.parameters()]))
+        # new_adapter_sum = torch.sum(torch.stack([torch.sum(p) for p in ip_adapter.adapter_modules.parameters()]))
 
         # Verify if the weights have 
         assert new_ip_proj_sum != orig_ip_proj_sum, "Weights of text_embedding_projector did not change!"
-        assert new_adapter_sum != orig_adapter_sum, "Weights of adapter_modules did not change!"
+        # assert new_adapter_sum != orig_adapter_sum, "Weights of adapter_modules did not change!"
 
         print(f"\n Successfully loaded weights from checkpoint")
 
@@ -1116,7 +1233,7 @@ def main():
                 add_time_ids = torch.cat(add_time_ids, dim=1).to(accelerator.device, dtype=weight_dtype)
                 unet_added_cond_kwargs = {"text_embeds": pooled_text_embeds, "time_ids": add_time_ids}
                 
-                noise_pred = ip_adapter(noisy_latents, timesteps, text_embeds, dino_v2, batch, unet_added_cond_kwargs)               
+                noise_pred = ip_adapter(noisy_latents, timesteps, text_embeds, dino_v2, vae, batch, unet_added_cond_kwargs)               
 
                 # Get the target for loss depending on the prediction type
                 if args.prediction_type is not None:
@@ -1155,20 +1272,16 @@ def main():
                 weighted_denoise_loss = args.denoise_loss_weight * denoise_loss
                 loss += weighted_denoise_loss
 
-                # pre = ip_adapter.text_embedding_projector.model_global_out[1].weight.data.detach().clone()
                 accelerator.backward(loss)
 
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
-                
-                # after = ip_adapter.text_embedding_projector.model_global_out[1].weight.data.detach().clone()
-                # x = (pre!=after).sum()
+
                 sum_loss += loss.detach().item()
 
             # Checks if the accelerator has performed an optimization step behind the scenes
-            if accelerator.sync_gradients:
-                # print(weighted_denoise_loss)
+            if accelerator.sync_gradients: 
                 progress_bar.update(1)
 
                 global_step += 1
@@ -1184,8 +1297,8 @@ def main():
 
                         accelerator.save_state(save_path)
                         revert_model.revert_model(
-                            ckpt= f'{save_path}/model.safetensors',
-                            outpdir_adapter_bin= f'{save_path}/text_embedding_projector.bin')
+                            ckpt= f'~/checkpoints/checkpoint-{global_step}/model.safetensors',
+                            outpdir_adapter_bin= f'~/checkpoints/checkpoint-{global_step}/text_embedding_projector.bin')
                         logger.info(f"Saved adapter state to {save_path}") 
 
                 mean_step = args.save_steps
