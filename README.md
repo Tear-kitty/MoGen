@@ -8,6 +8,8 @@ The source code of MoGen.
 
 ## 2. Text-to-image Training
 
+A small subset of our dataset to start the training: https://drive.google.com/drive/folders/1of2PCY_9rTvj9CQX5AvsRAvq_Yg9rzqn?usp=sharing
+
 To train the text-to-image model, run the following command:
 
 ```bash
