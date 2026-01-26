@@ -5,6 +5,9 @@ The source code of MoGen.
 ## 📄 Paper
 [![arXiv](https://img.shields.io/badge/arXiv-2601.05546-b31b1b.svg)](https://arxiv.org/abs/2601.05546)
 
+## 🎨 Qualitative Performance
+<img width="1081" height="1194" alt="e3bae49a-95bd-4964-b588-30e217a0b495" src="https://github.com/user-attachments/assets/0c8657b2-6453-4861-b8a4-6c103a967c5a" />
+
 ## 1. Todo
 - [x] Release training code
 - [x] Release evaluation code
