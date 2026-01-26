@@ -1,5 +1,4 @@
 import os
-#os.environ['CUDA_VISIBLE_DEVICES'] = '1' 
 import torch
 from diffusers import StableDiffusionXLPipeline, DiffusionPipeline
 from PIL import Image
@@ -43,7 +42,7 @@ def draw_one_box(canvas, box, label=None, thickness=3, fill=False, clamp=True):
     if fill:
         cv2.rectangle(canvas, (l,t), (r,b), color, -1)
     cv2.rectangle(canvas, (l,t), (r,b), color, thickness)
-    return canvas
+    return canvas, color
 
 def to_pil(canvas):
     return Image.fromarray(canvas)
@@ -52,7 +51,7 @@ from torchvision import transforms
 transform_mask = transforms.Compose([
     transforms.Resize((512, 512), interpolation=transforms.InterpolationMode.BICUBIC),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5,0.5,0.5], std=[0.5,0.5,0.5]),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
 
 def load_image(path):
@@ -61,10 +60,35 @@ def load_image(path):
     bg.paste(img, mask=img.split()[3])               
     return bg
 
+import re
+from typing import Iterable, List, Tuple
+_NUM_MAP = {
+    "a": 1, "an": 1, "one": 1,
+    "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+}
+
+_NUM_RE = re.compile(r'^\s*(' + "|".join(_NUM_MAP.keys()) + r')\b', re.IGNORECASE)
+
+def extract_count_words_and_numbers(object_path: Iterable[str]) -> Tuple[List[str], List[int]]:
+    words: List[str] = []
+    nums: List[int] = []
+
+    for p in object_path:
+        stem = os.path.splitext(os.path.basename(p))[0]
+        m = _NUM_RE.match(stem)
+        if not m:
+            continue
+        w = m.group(1).lower()
+        words.append(w + " ")       # 若不想要尾随空格，改成 words.append(w)
+        nums.append(_NUM_MAP[w])
+
+    return words, nums
+    
 if __name__ == "__main__":
     device = "cuda"
-    base_model_path = "~/models--stabilityai--stable-diffusion-xl-base-1.0/snapshots/462165984030d82259a11f4367a4eed129e94a7b/"
-    ip_ckpt = "~/checkpoints/checkpoint-0/text_embedding_projector.bin"
+    base_model_path = "models--stabilityai--stable-diffusion-xl-base-1.0"
     dino_v2 = AutoModel.from_pretrained('facebook/dinov2-with-registers-giant').to(device)
     dino_processor = AutoImageProcessor.from_pretrained('facebook/dinov2-with-registers-giant')
 
@@ -76,14 +100,13 @@ if __name__ == "__main__":
     )
     pipe.enable_vae_tiling()
 
-    prompt = 'three pandas and one puppy are standing together in shallow water' 
-    image_path = None #'~/data/image/3.png'
-    box_json_path = '~/data/box/3_box.json'
-    appearance_path = '~/data/object/3/'
+    prompt = '' 
+    image_path = None#'~.png'
+    box_json_path = None#'~.json'
+    appearance_path = '~/'
 
     if image_path is not None:
         image_reference = Image.open(image_path)
-        # original_width, original_height = image_reference.size
         structure_ref = dino_processor(images=image_reference, return_tensors="pt").pixel_values
         sturcture_ref_embeds = dino_v2(structure_ref.to(device)).last_hidden_state
     else:
@@ -105,23 +128,32 @@ if __name__ == "__main__":
             if x1>512 or y1>512 or x2>512 or y2>512:
                 raise ValueError('xy>512')
             box=[x1, y1, x2, y2]
-            canvas = draw_one_box(canvas, box, label, thickness=3, fill=False)
-            label+=1
+            box_label = shape['label']
+            canvas, color = draw_one_box(canvas, box, label, thickness=3, fill=False)
+            print(box_label)
         box_mask = to_pil(canvas)
-        box_mask.save(f"box.png") 
-        box_img=transform_mask(box_mask)
+        box_mask.save(f"~/results/box.png") 
+        box_mask=transform_mask(box_mask).cuda().unsqueeze(0)
+        box_img = dino_v2(box_mask).last_hidden_state
     else:
         box_img=None
 
     if appearance_path is not None:
         if os.path.exists(appearance_path):
-            images = [load_image(os.path.join(appearance_path, f))
-            for f in os.listdir(appearance_path) if f.lower().endswith(".png")]
+            images = [load_image(os.path.join(appearance_path, f)) for f in os.listdir(appearance_path) if f.lower().endswith(".png")]
+            object_path = [(os.path.join(appearance_path, f)) for f in os.listdir(appearance_path) if f.lower().endswith(".png")]
+            _, count_nums = extract_count_words_and_numbers(object_path)
             appearance_ref_tensor = [dino_processor(images=img, return_tensors="pt").pixel_values[0] for img in images]
             appearance_ref_tensor = torch.stack(appearance_ref_tensor, dim=0)
+            count_nums_tensor = torch.tensor(count_nums, device=appearance_ref_tensor.device)
+            appearance_ref_tensor = torch.repeat_interleave(
+                appearance_ref_tensor,
+                repeats=count_nums_tensor,
+                dim=0
+            )
             b, c, h, w = appearance_ref_tensor.shape
-            if b<6:
-                appearance_ref_tensor_padded = torch.zeros(6, c, h, w, dtype=appearance_ref_tensor.dtype, device=appearance_ref_tensor.device)
+            if b<15:
+                appearance_ref_tensor_padded = torch.zeros(15, c, h, w, dtype=appearance_ref_tensor.dtype, device=appearance_ref_tensor.device)
                 appearance_ref_tensor_padded[:b] = appearance_ref_tensor
             appearance_ref_num = torch.tensor(len(appearance_ref_tensor)).unsqueeze(0)
             appearance_ref = appearance_ref_tensor_padded.unsqueeze(0)
@@ -130,10 +162,6 @@ if __name__ == "__main__":
             appearance_ref = appearance_ref.reshape(b*n,c,h,w).half().cuda()
             image_reference_embeds = dino_v2(appearance_ref).last_hidden_state
             image_reference_embeds = image_reference_embeds.reshape(b,n,261,1536)
-            mask = torch.arange(image_reference_embeds.size(1)).unsqueeze(0).to(image_reference_embeds.device) < appearance_ref_num.unsqueeze(1).cuda()
-            mask = mask.unsqueeze(-1).unsqueeze(-1)
-            image_reference_embeds = image_reference_embeds * mask
-            image_reference_embeds = image_reference_embeds.reshape(b,n*261,1536)
     else:
         image_reference_embeds=None
 
@@ -141,13 +169,31 @@ if __name__ == "__main__":
     num_samples = 4
 
     if image_path is None and box_json_path is None and appearance_path is None:
+        ip_ckpt = "~/checkpoints/checkpoint-text/text_embedding_projector.bin"
         target_blocks = ['down_blocks.2.attentions.1']
-        ip_model = IPAdapterXL(pipe, ip_ckpt, device, num_tokens=128, target_blocks=target_blocks, use_control=False)
+        ip_model = IPAdapterXL(pipe, ip_ckpt, device, num_tokens=64, target_blocks=target_blocks, use_control=False)
     else:
+        ip_ckpt = "~/checkpoints/checkpoint-control/text_embedding_projector.bin"
         target_blocks = ['blocks']
-        ip_model = IPAdapterXL(pipe, ip_ckpt, device, num_tokens=512, target_blocks=target_blocks, use_control=True) #"block" up_blocks.0.attentions.1 down_blocks.2.attentions.1
+        ip_model = IPAdapterXL(pipe, ip_ckpt, device, num_tokens=256, target_blocks=target_blocks, use_control=True) #"block" up_blocks.0.attentions.1 down_blocks.2.attentions.1
 
-    prompt_i = prompt #+ ', best quality, high quality'
+    if image_path is not None:
+        sturcture_ref_embeds = ip_model.text_embedding_projector.structure_out(sturcture_ref_embeds.half())
+
+    if box_img is not None:
+        box_img = ip_model.text_embedding_projector.box_out(box_img.half())
+
+    if appearance_path is not None:
+        ref_pos_embeds = ip_model.text_embedding_projector.object_pos(torch.arange(15,device=image_reference_embeds.device).unsqueeze(0).expand(b, -1))
+        ref_pos_embeds = ref_pos_embeds.unsqueeze(2).repeat(1,1,261,1)
+        image_reference_embeds = image_reference_embeds+ref_pos_embeds
+        mask = torch.arange(image_reference_embeds.size(1)).unsqueeze(0).to(image_reference_embeds.device) < appearance_ref_num.unsqueeze(1).cuda()
+        mask = mask.unsqueeze(-1).unsqueeze(-1)
+        image_reference_embeds = image_reference_embeds * mask
+        image_reference_embeds = image_reference_embeds.reshape(b,n*261,1536)
+        image_reference_embeds = ip_model.text_embedding_projector.object_out(image_reference_embeds.half())
+
+    prompt_i = prompt 
     print({prompt})
     # start_time = time.perf_counter()
     images = ip_model.generate(
@@ -156,8 +202,8 @@ if __name__ == "__main__":
         appearance=image_reference_embeds,
         box=box_img,
         # box_mask = box_mask,
-        negative_prompt= None,#"text, watermark, lowres, low quality, worst quality, deformed, glitch, low contrast, noisy, saturation, blurry, bad anatomy",
-        scale=0.5, #attention_control
+        negative_prompt= None,
+        scale=0.8, #attention_control
         text_scale=0.8, #text_control
         guidance_scale=5,
         num_samples=num_samples,
