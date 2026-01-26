@@ -1,8 +1,9 @@
 # MoGen: An Adaptive Framework for Controllable Multi-Object Image Generation
-
-<img width="1037" height="1037" alt="5348c6df-9ea1-496b-9187-a3eb2aed2c9c" src="https://github.com/user-attachments/assets/1dc6cbb1-3fd4-4f59-b2ca-ab0a6ab09e98" />
-
+<img width="2752" height="1536" alt="Gemini_Generated_Image_hgj7iyhgj7iyhgj7" src="https://github.com/user-attachments/assets/0e404374-8bf3-4d0b-981a-5578a8f10ae9" />
 The source code of MoGen.
+
+## 📄 Paper
+[![arXiv](https://img.shields.io/badge/arXiv-2601.05546-b31b1b.svg)](https://arxiv.org/abs/2601.05546)
 
 ## 1. Todo
 - [x] Release training code
