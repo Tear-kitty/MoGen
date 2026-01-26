@@ -1,4 +1,6 @@
 # MoGen: An Adaptive Framework for Controllable Multi-Object Image Generation
+![Uploading 5348c6df-9ea1-496b-9187-a3eb2aed2c9c.png…]()
+
 The source code of MoGen.
 
 ## 1. Todo
