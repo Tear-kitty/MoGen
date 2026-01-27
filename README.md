@@ -54,6 +54,7 @@ python train.py --train_data_dir 'MoGen/data/' \
                         --ckpt_path "MoGen/checkpoint/text_embedding_projector.bin"
 ```
 - `--ckpt_path`: provide the path to your local checkpoint trained by train.py
+- If you want to train your own data, you can use [labelme](https://github.com/wkentaro/labelme) to get the same format with our box references.
   
 ## 🚀 4. Inference
 To inference the model, run the following command:
