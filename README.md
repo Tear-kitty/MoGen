@@ -13,7 +13,7 @@ The source code of MoGen.
 - [x] Release evaluation code
 - [ ] Release training dataset
 
-## 2. Text-to-image Training
+## 💻 2. Text-to-image Training
 
 A small subset of our dataset to start the training: https://drive.google.com/drive/folders/1of2PCY_9rTvj9CQX5AvsRAvq_Yg9rzqn?usp=sharing
 
@@ -28,7 +28,7 @@ python train_add_box.py --train_data_dir 'MoGen/data' \
                         --train_text True
 ```
 
-## 3. Adaptive Control Training
+## 💻 3. Adaptive Control Training
 
 To further train the adaptive control, run the following command:
 ```bash
@@ -40,16 +40,24 @@ python train_add_box.py --train_data_dir 'MoGen/data/' \
                         --train_text False \
                         --ckpt_path "MoGen/checkpoint/text_embedding_projector.bin"
 ```
-## 4. Inference
+## 🚀 4. Inference
 To inference the model, run the following command:
 ```bash
 python inference.py 
 ```
 Before launch the inference.py, please set the text prompt, structure reference, box reference or object reference:
 ```bash
-prompt = '~' text prompt 
-image_path = None or '~.png' structure reference
-box_json_path = None or '~.json' box reference
-appearance_path = None or '~.png' object reference
+prompt = '~' #text prompt 
+image_path = None or '~.png' #structure reference
+box_json_path = None or '~.json' #box reference
+appearance_path = None or '~.png' #object reference
 ```
 If 'None', it means that the current control signal is not used. Box reference and object reference are not necessary simultaneously.
+
+## Citation
+@article{li2026mogen,
+  title={MoGen: A Unified Collaborative Framework for Controllable Multi-Object Image Generation},
+  author={Li, Yanfeng and Sun, Yue and Fu, Keren and Im, Sio-Kei and Liu, Xiaoming and Zhai, Guangtao and Liu, Xiaohong and Tan, Tao},
+  journal={arXiv preprint arXiv:2601.05546},
+  year={2026}
+}
