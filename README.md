@@ -55,9 +55,12 @@ appearance_path = None or '~.png' #object reference
 If 'None', it means that the current control signal is not used. Box reference and object reference are not necessary simultaneously.
 
 ## Citation
+If you find the provided code or models useful for your research, consider citing them as:
+```bash
 @article{li2026mogen,
   title={MoGen: A Unified Collaborative Framework for Controllable Multi-Object Image Generation},
   author={Li, Yanfeng and Sun, Yue and Fu, Keren and Im, Sio-Kei and Liu, Xiaoming and Zhai, Guangtao and Liu, Xiaohong and Tan, Tao},
   journal={arXiv preprint arXiv:2601.05546},
   year={2026}
 }
+```
