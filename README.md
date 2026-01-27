@@ -29,19 +29,23 @@ A small subset of our dataset to start the training: https://drive.google.com/dr
 To train the text-to-image model, run the following command:
 
 ```bash
-python train_add_box.py --train_data_dir 'MoGen/data' \
+python train.py --train_data_dir 'MoGen/data' \
                         --output_dir 'MoGen/checkpoints' \
                         --train_batch_size 8 \
                         --max_train_steps 20000 \
                         --learning_rate 5e-05 \
                         --train_text True
 ```
-
+- `--train_data_dir`: provide the path to your dataset
+- `--output_dir`: provide the path to your local checkpoint directory
+- `--max_train_steps`: provide the maxmum training step
+- `--train_text`: whether to train the text-to-image
+  
 ## 💻 3. Adaptive Control Training
 
 To further train the adaptive control, run the following command:
 ```bash
-python train_add_box.py --train_data_dir 'MoGen/data/' \
+python train.py --train_data_dir 'MoGen/data/' \
                         --output_dir 'MoGen/checkpoints/' \
                         --train_batch_size 6 \
                         --max_train_steps 20000\
@@ -49,6 +53,8 @@ python train_add_box.py --train_data_dir 'MoGen/data/' \
                         --train_text False \
                         --ckpt_path "MoGen/checkpoint/text_embedding_projector.bin"
 ```
+- `--ckpt_path`: provide the path to your local checkpoint trained by train.py
+  
 ## 🚀 4. Inference
 To inference the model, run the following command:
 ```bash
