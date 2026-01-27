@@ -42,7 +42,13 @@ python train_add_box.py --train_data_dir 'MoGen/data/' \
 ```
 ## 4. Inference
 To inference the model, run the following command:
-Please refer to the code for reasoning cases.
 ```bash
 python inference.py 
 ```
+Before launch the inference.py, please set the text prompt, structure reference, box reference or object reference:
+prompt = '~' #text prompt 
+image_path = None or '~.png' #structure reference
+box_json_path = None or '~.json' #box reference
+appearance_path = None or '~.png' #object reference
+
+If 'None', it means that the current control signal is not used. Box reference and object reference are not necessary simultaneously.
