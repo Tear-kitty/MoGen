@@ -21,6 +21,11 @@ conda activate MoGen
 cd Lumina-Image-2.0
 pip install -r requirements.txt
 ```
+## 🎮 Model Zoo
+| Resolution | VAE | Ip_ckpt in code | 
+|------------|-----|--------------| 
+| 1024       | [SDXL](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/tree/main) | [Adapter](https://huggingface.co/h94/IP-Adapter/tree/main/sdxl_models) |
+
 
 ## 💻 2. Text-to-image Training
 
