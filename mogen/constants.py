@@ -5,13 +5,10 @@ CLI when running on another machine.
 """
 
 DEFAULT_BASE_MODEL_PATH = (
-    "/mnt/gemlab_data_2/lyf/huggingface_model/"
     "models--stabilityai--stable-diffusion-xl-base-1.0/"
-    "snapshots/462165984030d82259a11f4367a4eed129e94a7b/"
 )
 
 DEFAULT_BASE_ADAPTER_PATH = (
-    "/mnt/gemlab_data/User_database/LYF/InstantStyle-main/"
     "sdxl_models/ip-adapter_sdxl.bin"
 )
 
