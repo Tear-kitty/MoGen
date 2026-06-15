@@ -1,6 +1,6 @@
 <div align="center">
 
-# MoGen Refactored
+# MoGen: A Unified Collaborative Framework for Controllable Multi-Object Image Generation
 
 ### A flexible SDXL framework for controllable multi-object image generation
 
